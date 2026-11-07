@@ -29,4 +29,4 @@ The sample scholarship data is included in the frontend. No backend is required 
 
 ## Deployment
 
-Pushing to `main` builds and deploys the app to GitHub Pages through `.github/workflows/deploy.yml`.
+The repository is configured for Vercel (`vercel.json`): use `npm ci`, `npm run build`, and publish `dist`. Import the GitHub repository in Vercel and connect the `main` branch for automatic production deployments. The GitHub Pages workflow in `.github/workflows/deploy.yml` is also retained as a backup deployment target; the Vite asset base is selected for the host.
