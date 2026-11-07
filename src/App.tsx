@@ -1,61 +1,406 @@
-import { useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
-import { Activity, ArrowDownUp, ArrowLeft, ArrowRight, Award, Bell, Bookmark, CalendarDays, Check, ChevronRight, CircleHelp, Clock3, FileText, GraduationCap, Heart, LayoutDashboard, Menu, Search, Settings, ShieldCheck, SlidersHorizontal, Sparkles, UserRound, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  ArrowRight,
+  Bell,
+  Bookmark,
+  ChevronRight,
+  CircleHelp,
+  FileText,
+  GraduationCap,
+  LayoutDashboard,
+  Menu,
+  Search,
+  Settings,
+  Sparkles,
+  UserRound,
+  X,
+} from "lucide-react";
+import {
+  Dashboard,
+  Details,
+  Explore,
+  Matching,
+  Applications,
+  Saved,
+  ProfilePage,
+} from "./Pages";
+import {
+  initialApplications,
+  initialProfile,
+  initialSavedIds,
+  scholarships,
+} from "./data/scholarships";
+import { filterScholarships, matchScholarships } from "./domain/scholarships";
+import {
+  isApplicationList,
+  isProfile,
+  isSavedScholarshipList,
+  sanitizeProfile,
+  STORAGE_KEYS,
+} from "./lib/storage";
+import { usePersistentState } from "./hooks/usePersistentState";
+import type {
+  AmountFilter,
+  Page,
+  Scholarship,
+  SortOrder,
+  Status,
+} from "./types";
+import "./styles.css";
 
-type Page = 'Dashboard' | 'Explore Scholarships' | 'Eligibility Matching' | 'My Applications' | 'Saved Scholarships' | 'My Profile';
-type Status = 'Not Started' | 'In Progress' | 'Submitted' | 'Approved' | 'Rejected';
-type Scholarship = { id: string; name: string; provider: string; type: string; category: string; level: string[]; amount: number; deadline: string; description: string; criteria: string[]; documents: string[]; color: string; initials: string; incomeMax?: number; minMarks?: number; state?: string; applicantCategories?: string[] };
-type Profile = { name: string; email: string; phone: string; city: string; state: string; level: string; course: string; institution: string; marks: number; income: number; category: string; gender: string };
-type Application = { id: string; status: Status; updated: string };
+const navigation = [
+  { label: "Dashboard", icon: LayoutDashboard },
+  { label: "Explore Scholarships", icon: Search },
+  { label: "Eligibility Matching", icon: Sparkles },
+  { label: "My Applications", icon: FileText },
+  { label: "Saved Scholarships", icon: Bookmark },
+] as const satisfies ReadonlyArray<{
+  label: Page;
+  icon: typeof LayoutDashboard;
+}>;
 
-const scholarships: Scholarship[] = [
- { id:'nsp-post-matric',name:'Post Matric Scholarship for SC Students',provider:'Ministry of Social Justice & Empowerment',type:'Government',category:'Government',level:['Undergraduate','Postgraduate'],amount:48000,deadline:'2026-12-15',description:'Financial support for Scheduled Caste students pursuing post-matriculation studies in India. The award supports tuition fees, maintenance allowance and other compulsory academic expenses.',criteria:['Must belong to Scheduled Caste community','Annual family income must be below ₹2.5 lakh','Enrolled in a recognized post-matric course','Minimum 50% marks in the previous examination'],documents:['Caste certificate','Income certificate','Previous year marksheet','Aadhaar card','Bank passbook'],color:'#e5efe9',initials:'GO',incomeMax:250000,minMarks:50,applicantCategories:['SC']},
- { id:'reliance-foundation',name:'Reliance Foundation Undergraduate Scholarship',provider:'Reliance Foundation',type:'Private',category:'Private',level:['Undergraduate'],amount:200000,deadline:'2026-11-30',description:'A merit-cum-means scholarship empowering talented first-year undergraduate students to pursue their academic dreams and build a brighter future.',criteria:['First-year undergraduate student in India','Household income below ₹15 lakh','Minimum 60% marks in Class 12','Complete the aptitude test'],documents:['Class 12 marksheet','Income proof','Aadhaar card','Bonafide certificate','Bank details'],color:'#f4ebd7',initials:'RF',incomeMax:1500000,minMarks:60},
- { id:'tata-trusts',name:'Tata Trusts Means Grant',provider:'Tata Trusts',type:'Private',category:'Need-based',level:['Undergraduate','Postgraduate'],amount:75000,deadline:'2026-12-20',description:'Need-based grant helping deserving students from Maharashtra continue their higher education with reduced financial pressure.',criteria:['Domicile of Maharashtra','Enrolled in a recognized higher education institution','Family income below ₹4 lakh','Demonstrated financial need'],documents:['Domicile certificate','Income certificate','Fee receipt','Academic transcripts'],color:'#e9e5f2',initials:'TT',incomeMax:400000,state:'Maharashtra'},
- { id:'inspire-she',name:'INSPIRE Scholarship for Higher Education',provider:'Department of Science & Technology',type:'Government',category:'STEM',level:['Undergraduate'],amount:80000,deadline:'2027-01-10',description:'Encouraging students to pursue natural and basic sciences at the undergraduate and postgraduate levels through annual scholarships and mentorship.',criteria:['Pursuing BSc, BS or integrated MSc in basic sciences','Top 1% in Class 12 board examination or qualifying rank','Must be enrolled in a recognized institution','Study in eligible science subjects'],documents:['Class 12 marksheet','College admission proof','Bank details','Aadhaar card'],color:'#dfeef0',initials:'IN',minMarks:85},
- { id:'hdfc-ecss',name:'HDFC Bank Parivartan ECSS Programme',provider:'HDFC Bank',type:'Private',category:'Need-based',level:['Undergraduate','Postgraduate','School'],amount:75000,deadline:'2026-12-08',description:'Emergency assistance for meritorious students facing a personal or family crisis that may prevent them from continuing their education.',criteria:['Indian national studying in India','Minimum 55% marks in previous examination','Family income below ₹2.5 lakh','Recent personal or family crisis'],documents:['Previous marksheet','Income proof','Crisis documentation','Fee receipt','Bank details'],color:'#e6f0f6',initials:'HB',incomeMax:250000,minMarks:55},
- { id:'azim-premji',name:'Azim Premji Foundation Scholarship',provider:'Azim Premji Foundation',type:'Institutional',category:'Institutional',level:['Undergraduate'],amount:30000,deadline:'2027-01-05',description:'Supporting young women from underserved communities as they pursue undergraduate degrees at recognized Indian universities.',criteria:['Woman student from a disadvantaged background','Enrolled in a full-time undergraduate degree','Family income below ₹3 lakh','Renewable with satisfactory academic progress'],documents:['College ID','Income certificate','Previous marksheet','Aadhaar card'],color:'#f4e5e0',initials:'AP',incomeMax:300000},
- { id:'oasis-minority',name:'Merit-cum-Means Scholarship for Minorities',provider:'Ministry of Minority Affairs',type:'Government',category:'Government',level:['Undergraduate','Postgraduate'],amount:25000,deadline:'2026-12-12',description:'Assistance for economically weaker students from minority communities enrolled in professional and technical courses.',criteria:['Belong to a notified minority community','Minimum 50% marks in previous examination','Family income below ₹2.5 lakh','Enrolled in professional or technical course'],documents:['Minority certificate','Income certificate','Previous marksheet','Institute verification'],color:'#e7eddd',initials:'MM',incomeMax:250000,minMarks:50,applicantCategories:['Minority']},
- { id:'sitaram-jindal',name:'Sitaram Jindal Foundation Scholarship',provider:'Sitaram Jindal Foundation',type:'Private',category:'Merit-based',level:['Undergraduate','Postgraduate','School'],amount:36000,deadline:'2027-02-15',description:'A long-running scholarship programme supporting deserving students across India in school, college and professional courses.',criteria:['Enrolled in a recognized institution','Meet course-specific academic requirements','Family income below ₹4 lakh','Not receiving another major scholarship'],documents:['Marksheets','Income proof','Institution certificate','Bank passbook'],color:'#f1e8d9',initials:'SJ',incomeMax:400000},
-];
-const initialProfile: Profile = { name:'Aarav Mehta',email:'aarav.mehta@email.com',phone:'+91 98765 43210',city:'Pune',state:'Maharashtra',level:'Undergraduate',course:'B.Tech Computer Science',institution:'Pune Institute of Technology',marks:82,income:420000,category:'General',gender:'Male' };
-const initialApps: Application[] = [{id:'reliance-foundation',status:'In Progress',updated:'2026-10-22'},{id:'inspire-she',status:'Submitted',updated:'2026-10-18'},{id:'hdfc-ecss',status:'Not Started',updated:'2026-10-12'}];
-const readStore = <T,>(key:string,fallback:T):T => { try { const x=localStorage.getItem(key); return x?JSON.parse(x) as T:fallback; } catch { return fallback; } };
-const money = (n:number) => `₹${n.toLocaleString('en-IN')}`;
-const dateLabel = (d:string) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
-const daysLeft = (d:string) => Math.ceil((new Date(`${d}T23:59:59`).getTime()-Date.now())/86400000);
-
-function App(){
- const [page,setPage]=useState<Page>('Dashboard'); const [profile,setProfile]=useState<Profile>(()=>readStore('grantly-profile',initialProfile)); const [saved,setSaved]=useState<string[]>(()=>readStore('grantly-saved',['reliance-foundation','inspire-she'])); const [apps,setApps]=useState<Application[]>(()=>readStore('grantly-applications',initialApps)); const [selected,setSelected]=useState<Scholarship|null>(null); const [toast,setToast]=useState(''); const [mobileOpen,setMobileOpen]=useState(false);
- const [query,setQuery]=useState(''); const [category,setCategory]=useState('All'); const [level,setLevel]=useState('All'); const [sort,setSort]=useState('deadline'); const [amountFilter,setAmountFilter]=useState('Any amount');
- const [matchDone,setMatchDone]=useState(false); const [matchProfile,setMatchProfile]=useState<Profile>(profile);
- const [appFilter,setAppFilter]=useState('All');
- const notify=(s:string)=>{setToast(s);window.setTimeout(()=>setToast(''),2600)};
- const updateSaved=(id:string)=>{setSaved(v=>{const next=v.includes(id)?v.filter(x=>x!==id):[...v,id];localStorage.setItem('grantly-saved',JSON.stringify(next));notify(v.includes(id)?'Removed from saved scholarships':'Scholarship saved');return next;});};
- const updateApps=(id:string,status:Status)=>{setApps(v=>{const next=v.some(a=>a.id===id)?v.map(a=>a.id===id?{...a,status,updated:new Date().toISOString().slice(0,10)}:a):[...v,{id,status,updated:new Date().toISOString().slice(0,10)}];localStorage.setItem('grantly-applications',JSON.stringify(next));return next;});notify('Application status updated');};
- const changePage=(p:Page)=>{setPage(p);setSelected(null);setMobileOpen(false);};
- const filtered=useMemo(()=>scholarships.filter(s=>(!query||`${s.name} ${s.provider} ${s.description}`.toLowerCase().includes(query.toLowerCase()))&&(category==='All'||s.category===category||s.type===category)&&(level==='All'||s.level.includes(level))&&(amountFilter==='Any amount'||(amountFilter==='Under ₹50,000'?s.amount<50000:amountFilter==='₹50,000 – ₹1 lakh'?s.amount>=50000&&s.amount<=100000:s.amount>100000))).sort((a,b)=>sort==='amount'?b.amount-a.amount:sort==='name'?a.name.localeCompare(b.name):a.deadline.localeCompare(b.deadline)),[query,category,level,sort,amountFilter]);
- const matched=useMemo(()=>scholarships.map(s=>{const checks=[!s.level.length||s.level.includes(matchProfile.level),!s.incomeMax||matchProfile.income<=s.incomeMax,!s.minMarks||matchProfile.marks>=s.minMarks,!s.state||s.state===matchProfile.state,!s.applicantCategories||s.applicantCategories.includes(matchProfile.category)];const score=Math.round(checks.filter(Boolean).length/checks.length*100);const missing:string[]=[];if(s.level.length&&!s.level.includes(matchProfile.level))missing.push(`Study level must be ${s.level.join(' or ')}`);if(s.incomeMax&&matchProfile.income>s.incomeMax)missing.push(`Family income must be under ${money(s.incomeMax)}`);if(s.minMarks&&matchProfile.marks<s.minMarks)missing.push(`Previous marks must be at least ${s.minMarks}%`);if(s.state&&s.state!==matchProfile.state)missing.push(`Must be a domicile of ${s.state}`);if(s.applicantCategories&&!s.applicantCategories.includes(matchProfile.category))missing.push(`Category must be ${s.applicantCategories.join(' or ')}`);return {s,score,missing};}).sort((a,b)=>b.score-a.score),[matchProfile]);
- const applicationFor=(id:string)=>apps.find(a=>a.id===id); const navigateDetail=(s:Scholarship)=>{setSelected(s);};
- return <div className="app-shell"><aside className={`sidebar ${mobileOpen?'open':''}`}><div className="brand"><div className="brand-mark"><GraduationCap size={21}/></div><span>GRANTLY</span><button className="icon-btn mobile-close" onClick={()=>setMobileOpen(false)}><X size={18}/></button></div><div className="workspace-label">WORKSPACE</div><nav>{([{label:'Dashboard',icon:LayoutDashboard},{label:'Explore Scholarships',icon:Search},{label:'Eligibility Matching',icon:Sparkles},{label:'My Applications',icon:FileText},{label:'Saved Scholarships',icon:Bookmark}] as const).map(i=><button key={i.label} className={`nav-item ${page===i.label&&!selected?'active':''}`} onClick={()=>changePage(i.label)}><i.icon size={18}/><span>{i.label}</span>{i.label==='Saved Scholarships'&&saved.length>0&&<span className="nav-count">{saved.length}</span>}</button>)}</nav><div className="sidebar-bottom"><div className="help-card"><div className="help-icon"><CircleHelp size={17}/></div><strong>Need a hand?</strong><p>Our scholarship guide is here to help you.</p><button onClick={()=>notify('Scholarship guide is coming soon')}>Explore guide <ArrowRight size={13}/></button></div><button className={`nav-item ${page==='My Profile'?'active':''}`} onClick={()=>changePage('My Profile')}><UserRound size={18}/><span>My Profile</span></button><div className="user-mini"><div className="avatar">{profile.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div className="user-info"><strong>{profile.name}</strong><span>Student account</span></div><button className="icon-btn" aria-label="Account settings" onClick={()=>changePage('My Profile')}><Settings size={17}/></button></div></div></aside>
- <main className="main-area"><header className="topbar"><button className="icon-btn menu-toggle" onClick={()=>setMobileOpen(true)} aria-label="Open menu"><Menu size={20}/></button><div className="breadcrumb">Workspace <ChevronRight size={14}/><span>{selected?'Scholarship details':page}</span></div><div className="top-actions"><button className="icon-btn notification" aria-label="Notifications" onClick={()=>notify('You’re all caught up')}><Bell size={18}/><i/></button><div className="top-avatar">{profile.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div></div></header>
- <div className="page-content">{selected?<Details scholarship={selected} saved={saved.includes(selected.id)} onSave={()=>updateSaved(selected.id)} onBack={()=>setSelected(null)} status={applicationFor(selected.id)?.status||'Not Started'} onStatus={s=>updateApps(selected.id,s)} notify={notify}/>:page==='Dashboard'?<Dashboard profile={profile} saved={saved} apps={apps} open={navigateDetail} go={changePage}/>:page==='Explore Scholarships'?<Explore query={query} setQuery={setQuery} category={category} setCategory={setCategory} level={level} setLevel={setLevel} sort={sort} setSort={setSort} amountFilter={amountFilter} setAmountFilter={setAmountFilter} scholarships={filtered} saved={saved} open={navigateDetail} toggleSave={updateSaved}/>:page==='Eligibility Matching'?<Matching profile={matchProfile} setProfile={setMatchProfile} done={matchDone} setDone={setMatchDone} matched={matched} open={navigateDetail}/>:page==='My Applications'?<Applications apps={apps} filter={appFilter} setFilter={setAppFilter} open={navigateDetail} update={updateApps}/>:page==='Saved Scholarships'?<Saved saved={saved} open={navigateDetail} toggle={updateSaved} go={changePage}/>:<ProfilePage profile={profile} setProfile={setProfile} notify={notify}/>}</div>
- </main>{toast&&<motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} className="toast"><span className="toast-check"><Check size={15}/></span>{toast}</motion.div>}</div>
+function initials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 }
 
-function Heading({eyebrow,title,sub,action}:{eyebrow?:string;title:string;sub?:string;action?:React.ReactNode}){return <div className="page-heading"><div>{eyebrow&&<div className="eyebrow">{eyebrow}</div>}<h1>{title}</h1>{sub&&<p>{sub}</p>}</div>{action}</div>}
-function ScholarshipCard({s,saved,open,toggle}:{s:Scholarship;saved:boolean;open:()=>void;toggle:()=>void}){return <motion.article whileHover={{y:-3}} className="scholarship-card"><div className="card-top"><div className="org-avatar" style={{background:s.color}}>{s.initials}</div><div className="org-name"><strong>{s.provider}</strong><span>{s.type} · {s.category}</span></div><button className={`save-btn ${saved?'saved':''}`} aria-label={saved?'Remove from saved':'Save scholarship'} onClick={e=>{e.stopPropagation();toggle();}}><Bookmark size={17} fill={saved?'currentColor':'none'}/></button></div><button className="card-title" onClick={open}>{s.name}</button><p className="card-desc">{s.description}</p><div className="card-pills">{s.level.map(l=><span key={l}>{l}</span>)}</div><div className="card-footer"><div><span className="meta-label">AWARD AMOUNT</span><strong className="amount">{money(s.amount)}<small> / year</small></strong></div><div className="deadline"><span className="meta-label">DEADLINE</span><strong><CalendarDays size={14}/>{dateLabel(s.deadline)}</strong></div></div><button className="card-link" onClick={open}>View details <ArrowRight size={15}/></button></motion.article>}
-function Dashboard({profile,saved,apps,open,go}:{profile:Profile;saved:string[];apps:Application[];open:(s:Scholarship)=>void;go:(p:Page)=>void}){const upcoming=[...scholarships].sort((a,b)=>a.deadline.localeCompare(b.deadline)).slice(0,3);const recs=scholarships.filter(s=>s.level.includes(profile.level)).slice(0,3);const submitted=apps.filter(a=>a.status==='Submitted').length;return <><div className="welcome-banner"><div className="welcome-text"><div className="welcome-tag"><Sparkles size={13}/> YOUR SCHOLARSHIP JOURNEY</div><h1>Good morning, {profile.name.split(' ')[0]} <span>✦</span></h1><p>Your next opportunity is closer than you think. Let’s find it together.</p><button className="light-cta" onClick={()=>go('Explore Scholarships')}>Explore scholarships <ArrowRight size={15}/></button></div><div className="banner-art"><div className="art-orbit orbit-one"/><div className="art-orbit orbit-two"/><div className="art-star">✳</div><div className="art-cap"><GraduationCap size={56}/></div><div className="art-sparkle">✦</div></div><div className="banner-foot">A LITTLE PROGRESS GOES A LONG WAY <span>✦</span></div></div><div className="stats-grid"><Stat icon={<Search size={18}/>} label="Opportunities for you" value="24" detail="matched to your profile" tone="mint"/><Stat icon={<Bookmark size={18}/>} label="Saved scholarships" value={String(saved.length).padStart(2,'0')} detail="ready when you are" tone="gold"/><Stat icon={<FileText size={18}/>} label="Applications in progress" value={String(apps.filter(a=>a.status==='In Progress').length+submitted).padStart(2,'0')} detail={`${submitted} submitted`} tone="lavender"/><Stat icon={<Award size={18}/>} label="Potential funding" value="₹2.8L" detail="across your matches" tone="blue"/></div><div className="dashboard-grid"><section className="panel recommended-panel"><div className="section-head"><div><div className="eyebrow">HANDPICKED FOR YOU</div><h2>Recommended scholarships</h2></div><button className="text-link" onClick={()=>go('Explore Scholarships')}>See all <ArrowRight size={14}/></button></div><div className="recommend-list">{recs.map(s=><div className="recommend-row" key={s.id} onClick={()=>open(s)}><div className="org-avatar small" style={{background:s.color}}>{s.initials}</div><div className="recommend-info"><strong>{s.name}</strong><span>{s.provider}</span></div><div className="recommend-amount">{money(s.amount)}<span>per year</span></div><ChevronRight size={17} className="muted-icon"/></div>)}</div></section><section className="panel deadlines-panel"><div className="section-head"><div><div className="eyebrow">DON’T MISS OUT</div><h2>Upcoming deadlines</h2></div><CalendarDays size={19} className="muted-icon"/></div><div className="deadline-list">{upcoming.map((s,i)=><button className="deadline-row" key={s.id} onClick={()=>open(s)}><div className={`date-badge date-${i}`}><span>{new Date(`${s.deadline}T00:00:00`).toLocaleDateString('en-IN',{month:'short'})}</span><strong>{new Date(`${s.deadline}T00:00:00`).getDate()}</strong></div><div className="deadline-info"><strong>{s.name}</strong><span>{daysLeft(s.deadline)} days left <i/></span></div><ChevronRight size={16}/></button>)}</div></section></div><section className="panel activity-panel"><div className="section-head"><div><div className="eyebrow">YOUR PROGRESS</div><h2>Recent application activity</h2></div><button className="text-link" onClick={()=>go('My Applications')}>View applications <ArrowRight size={14}/></button></div>{apps.length===0?<div className="empty-inline">Your application activity will appear here.</div>:<div className="activity-list">{apps.slice(0,4).map(a=>{const s=scholarships.find(x=>x.id===a.id)!;return <div className="activity-row" key={a.id}><div className={`activity-dot dot-${a.status.replace(/ /g,'-').toLowerCase()}`}>{a.status==='Submitted'?<Check size={13}/>:<FileText size={13}/>}</div><div className="activity-copy"><strong>{s.name}</strong><span>{a.status==='Submitted'?'Application submitted':a.status==='In Progress'?'Application started':'Added to your list'} · {dateLabel(a.updated)}</span></div><StatusBadge status={a.status}/><ChevronRight size={15} className="muted-icon"/></div>})}</div>}</section></>}
-function Stat({icon,label,value,detail,tone}:{icon:React.ReactNode;label:string;value:string;detail:string;tone:string}){return <div className="stat-card"><div className={`stat-icon ${tone}`}>{icon}</div><div><span className="stat-label">{label}</span><strong className="stat-value">{value}</strong><span className="stat-detail">{detail}</span></div></div>}
-function Explore({query,setQuery,category,setCategory,level,setLevel,sort,setSort,amountFilter,setAmountFilter,scholarships:savedList,saved,open,toggleSave}:{query:string;setQuery:(s:string)=>void;category:string;setCategory:(s:string)=>void;level:string;setLevel:(s:string)=>void;sort:string;setSort:(s:string)=>void;amountFilter:string;setAmountFilter:(s:string)=>void;scholarships:Scholarship[];saved:string[];open:(s:Scholarship)=>void;toggleSave:(s:string)=>void}){const categories=['All','Government','Private','Institutional','Need-based','Merit-based','STEM'];return <><Heading eyebrow="FIND YOUR FUNDING" title="Explore scholarships" sub="Discover funding that fits your ambitions, background, and next big step."/><div className="explore-search"><Search size={19}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search by scholarship, provider, or keyword..."/><kbd>⌘ K</kbd></div><div className="filter-toolbar"><div className="filter-group"><SlidersHorizontal size={16}/><span>Filter by</span><select value={category} onChange={e=>setCategory(e.target.value)} aria-label="Scholarship category">{categories.map(c=><option key={c}>{c}</option>)}</select><select value={level} onChange={e=>setLevel(e.target.value)} aria-label="Education level"><option>All</option><option>School</option><option>Undergraduate</option><option>Postgraduate</option></select><select value={amountFilter} onChange={e=>setAmountFilter(e.target.value)} aria-label="Award amount"><option>Any amount</option><option>Under ₹50,000</option><option>₹50,000 – ₹1 lakh</option><option>Above ₹1 lakh</option></select></div><label className="sort-control"><ArrowDownUp size={15}/><select value={sort} onChange={e=>setSort(e.target.value)} aria-label="Sort scholarships"><option value="deadline">Deadline soon</option><option value="amount">Award amount</option><option value="name">Name A–Z</option></select></label></div><div className="result-line"><span><strong>{savedList.length}</strong> scholarships found</span><span>Updated for 2026–27</span></div>{savedList.length?<div className="scholarship-grid">{savedList.map(s=><ScholarshipCard key={s.id} s={s} saved={saved.includes(s.id)} open={()=>open(s)} toggle={()=>toggleSave(s.id)}/>)}</div>:<EmptyState icon={<Search size={22}/>} title="No scholarships found" text="Try adjusting your filters or search with different keywords."/>}</>}
-function Details({scholarship:s,saved,onSave,onBack,status,onStatus,notify}:{scholarship:Scholarship;saved:boolean;onSave:()=>void;onBack:()=>void;status:Status;onStatus:(s:Status)=>void;notify:(s:string)=>void}){return <><button className="back-link" onClick={onBack}><ArrowLeft size={15}/> Back to scholarships</button><div className="detail-layout"><div className="detail-main"><div className="detail-hero"><div className="detail-org"><div className="org-avatar large" style={{background:s.color}}>{s.initials}</div><div><span className="pill-type">{s.type} scholarship</span><h1>{s.name}</h1><p>{s.provider}</p></div></div><div className="detail-award"><span>ANNUAL AWARD</span><strong>{money(s.amount)}</strong></div></div><div className="detail-tabs"><span className="active">Overview</span><span>Eligibility</span><span>Documents</span></div><section className="detail-section"><h2>About this scholarship</h2><p>{s.description}</p></section><section className="detail-section"><h2>Eligibility criteria</h2><ul className="criteria-list">{s.criteria.map(x=><li key={x}><span className="check-mark"><Check size={13}/></span>{x}</li>)}</ul></section><section className="detail-section"><h2>Required documents</h2><div className="document-grid">{s.documents.map((x,i)=><div className="document-item" key={x}><div className="doc-icon"><FileText size={17}/></div><span>{x}</span><span className="doc-number">0{i+1}</span></div>)}</div></section></div><aside className="detail-aside"><div className="panel apply-panel"><div className="aside-label"><Clock3 size={15}/> APPLICATION TIMELINE</div><div className="deadline-callout"><span>Application deadline</span><strong>{dateLabel(s.deadline)}</strong><em className={daysLeft(s.deadline)<14?'urgent':''}>{daysLeft(s.deadline)} days remaining</em></div><div className="aside-fact"><span>Award amount</span><strong>{money(s.amount)} <small>/ year</small></strong></div><div className="aside-fact"><span>Study level</span><strong>{s.level.join(', ')}</strong></div><div className="aside-fact"><span>Category</span><strong>{s.category}</strong></div><button className="primary-btn full" onClick={()=>{if(status==='Not Started'||status==='Rejected')onStatus('In Progress');else notify('Your application is already in progress');}}>{status==='Submitted'||status==='Approved'?'Application '+status:'Start application'} <ArrowRight size={16}/></button><button className={`secondary-btn full ${saved?'selected':''}`} onClick={onSave}><Bookmark size={16} fill={saved?'currentColor':'none'}/>{saved?'Saved to your list':'Save scholarship'}</button><div className="secure-note"><ShieldCheck size={15}/> Your information stays private and secure.</div></div><div className="aside-help"><div className="help-icon"><CircleHelp size={17}/></div><div><strong>Need help applying?</strong><p>Check your eligibility before you apply.</p></div><button onClick={()=>notify('Visit Eligibility Matching to check your fit')}>Check eligibility <ArrowRight size={14}/></button></div></aside></div></>}
-function Matching({profile,setProfile,done,setDone,matched,open}:{profile:Profile;setProfile:(p:Profile)=>void;done:boolean;setDone:(b:boolean)=>void;matched:{s:Scholarship;score:number;missing:string[]}[];open:(s:Scholarship)=>void}){const set=(k:keyof Profile,v:string|number)=>{setProfile({...profile,[k]:v});setDone(false);};return <><Heading eyebrow="PERSONALIZED FOR YOU" title="Find your best fit" sub="A few details help us match you with scholarships you’re most likely to qualify for."/><div className="matching-layout"><form className="panel match-form" onSubmit={e=>{e.preventDefault();setDone(true);}}><div className="form-section-head"><div className="form-step">01</div><div><h2>Your academic details</h2><p>Tell us where you are in your education.</p></div></div><div className="form-grid"><label>Education level<select value={profile.level} onChange={e=>set('level',e.target.value)}><option>School</option><option>Undergraduate</option><option>Postgraduate</option></select></label><label>Course or field<input value={profile.course} onChange={e=>set('course',e.target.value)} placeholder="e.g. B.Tech Computer Science"/></label><label>Current institution<input value={profile.institution} onChange={e=>set('institution',e.target.value)} placeholder="Your college or school"/></label><label>Previous exam marks (%)<input type="number" min="0" max="100" value={profile.marks} onChange={e=>set('marks',Number(e.target.value))}/></label></div><div className="form-separator"/><div className="form-section-head"><div className="form-step">02</div><div><h2>Your background</h2><p>This information helps find relevant opportunities.</p></div></div><div className="form-grid"><label>Annual family income<select value={profile.income<=250000?150000:profile.income<=500000?400000:profile.income<=1000000?800000:1500000} onChange={e=>set('income',Number(e.target.value))}><option value={150000}>Below ₹2.5 lakh</option><option value={400000}>₹2.5 – ₹5 lakh</option><option value={800000}>₹5 – ₹10 lakh</option><option value={1500000}>Above ₹10 lakh</option></select></label><label>State of domicile<input value={profile.state} onChange={e=>set('state',e.target.value)}/></label><label>Category<select value={profile.category} onChange={e=>set('category',e.target.value)}>{['General','OBC','SC','ST','EWS','Minority'].map(x=><option key={x}>{x}</option>)}</select></label><label>Gender<select value={profile.gender} onChange={e=>set('gender',e.target.value)}>{['Prefer not to say','Female','Male','Other'].map(x=><option key={x}>{x}</option>)}</select></label></div><button className="primary-btn match-submit" type="submit"><Sparkles size={16}/> Find my matches <ArrowRight size={16}/></button></form><div className="match-side"><div className="match-note"><div className="note-icon"><ShieldCheck size={19}/></div><strong>Your data stays yours</strong><p>Your profile details are only used to calculate scholarship matches and are saved on this device.</p></div><div className="match-note criteria-note"><div className="note-icon gold-note"><Activity size={19}/></div><strong>How matching works</strong><p>We compare your education level, academic marks, family income and domicile against each scholarship’s criteria.</p></div></div></div>{done&&<section className="match-results"><div className="section-head"><div><div className="eyebrow">YOUR RESULTS</div><h2>{matched.filter(x=>x.score>=50).length} scholarships match your profile</h2></div><span className="match-personal"><Sparkles size={14}/> Based on your details</span></div><div className="match-result-grid">{matched.map(({s,score,missing})=><button className="match-result" key={s.id} onClick={()=>open(s)}><div className="match-result-head"><div className="org-avatar small" style={{background:s.color}}>{s.initials}</div><span className={`match-score ${score>=75?'high':''}`}>{score}% match</span></div><strong>{s.name}</strong><span className="result-provider">{s.provider} · {money(s.amount)}</span>{missing.length? <span className="missing-criteria">Still needed: {missing.join(' · ')}</span>:<span className="perfect-fit"><Check size={13}/> You meet all listed criteria</span>}<span className="result-view">View details <ArrowRight size={14}/></span></button>)}</div></section>}</>}
-function Applications({apps,filter,setFilter,open,update}:{apps:Application[];filter:string;setFilter:(s:string)=>void;open:(s:Scholarship)=>void;update:(id:string,s:Status)=>void}){const filters=['All','Not Started','In Progress','Submitted','Approved','Rejected'];const list=apps.filter(a=>filter==='All'||a.status===filter);return <><Heading eyebrow="KEEP IT MOVING" title="My applications" sub="Every application, one clear view. You’ve got this." action={<button className="primary-btn" onClick={()=>document.getElementById('application-list')?.scrollIntoView({behavior:'smooth'})}><FileText size={16}/> Track applications</button>}/><div className="application-summary">{(['Not Started','In Progress','Submitted','Approved','Rejected'] as Status[]).map(s=><div key={s}><span className={`summary-dot status-dot-${s.toLowerCase().replace(/ /g,'-')}`}/><span>{s}</span><strong>{apps.filter(a=>a.status===s).length}</strong></div>)}</div><div className="app-filter-row"><div className="tab-filters">{filters.map(x=><button key={x} className={filter===x?'active':''} onClick={()=>setFilter(x)}>{x}{x==='All'&&<span>{apps.length}</span>}</button>)}</div><span className="result-count">{list.length} applications</span></div>{list.length?<div className="application-table" id="application-list"><div className="table-head"><span>SCHOLARSHIP</span><span>DEADLINE</span><span>STATUS</span><span>LAST UPDATED</span><span>ACTION</span></div>{list.map(a=>{const s=scholarships.find(x=>x.id===a.id)!;return <div className="application-row" key={a.id}><button className="application-title" onClick={()=>open(s)}><div className="org-avatar small" style={{background:s.color}}>{s.initials}</div><span><strong>{s.name}</strong><small>{s.provider}</small></span></button><div className="table-deadline"><strong>{dateLabel(s.deadline)}</strong><small className={daysLeft(s.deadline)<14?'urgent':''}>{daysLeft(s.deadline)} days left</small></div><StatusBadge status={a.status}/><span className="updated-date">{dateLabel(a.updated)}</span><select className="status-select" value={a.status} aria-label={`Update ${s.name} status`} onChange={e=>update(a.id,e.target.value as Status)}>{(['Not Started','In Progress','Submitted','Approved','Rejected'] as Status[]).map(x=><option key={x}>{x}</option>)}</select></div>})}</div>:<EmptyState icon={<FileText size={22}/>} title="No applications here yet" text="Start an application from a scholarship details page to track your progress."/>}</>}
-function StatusBadge({status}:{status:Status}){return <span className={`status-badge status-${status.toLowerCase().replace(/ /g,'-')}`}><i/>{status}</span>}
-function Saved({saved,open,toggle,go}:{saved:string[];open:(s:Scholarship)=>void;toggle:(s:string)=>void;go:(p:Page)=>void}){const list=scholarships.filter(s=>saved.includes(s.id));return <><Heading eyebrow="YOUR SHORTLIST" title="Saved scholarships" sub="Good things take planning. Keep your favorites close." action={<button className="secondary-btn" onClick={()=>go('Explore Scholarships')}><Search size={16}/> Explore more</button>}/><div className="saved-intro"><div className="saved-heart"><Heart size={18} fill="currentColor"/></div><div><strong>{list.length} opportunities saved</strong><span>Pick up where you left off whenever you’re ready.</span></div></div>{list.length?<div className="scholarship-grid">{list.map(s=><ScholarshipCard key={s.id} s={s} saved open={()=>open(s)} toggle={()=>toggle(s.id)}/>)}</div>:<EmptyState icon={<Bookmark size={22}/>} title="Your shortlist is waiting" text="Save scholarships that catch your eye, and they’ll show up here." action={<button className="primary-btn" onClick={()=>go('Explore Scholarships')}>Explore scholarships <ArrowRight size={15}/></button>}/>}</>}
-function ProfilePage({profile,setProfile,notify}:{profile:Profile;setProfile:(p:Profile)=>void;notify:(s:string)=>void}){const [draft,setDraft]=useState(profile);const change=(k:keyof Profile,v:string|number)=>setDraft({...draft,[k]:v});const submit=(e:React.FormEvent)=>{e.preventDefault();setProfile(draft);localStorage.setItem('grantly-profile',JSON.stringify(draft));notify('Your profile has been saved');};return <><Heading eyebrow="ABOUT YOU" title="My profile" sub="A little about you goes a long way toward finding the right support."/><form className="profile-layout" onSubmit={submit}><div className="profile-main"><div className="panel profile-panel"><div className="profile-header"><div className="profile-large-avatar">{draft.name.split(' ').map(x=>x[0]).join('').slice(0,2)}</div><div><h2>{draft.name}</h2><p>Student profile · Last updated just now</p></div><div className="profile-completion"><span>PROFILE</span><strong>85%</strong></div></div><div className="profile-section"><div className="section-head"><div><h3>Personal information</h3><p>Basic details to personalize your experience.</p></div><UserRound size={18}/></div><div className="form-grid"><label>Full name<input value={draft.name} onChange={e=>change('name',e.target.value)} required/></label><label>Email address<input type="email" value={draft.email} onChange={e=>change('email',e.target.value)} required/></label><label>Phone number<input value={draft.phone} onChange={e=>change('phone',e.target.value)}/></label><label>City<input value={draft.city} onChange={e=>change('city',e.target.value)}/></label><label>State of domicile<input value={draft.state} onChange={e=>change('state',e.target.value)}/></label><label>Category<select value={draft.category} onChange={e=>change('category',e.target.value)}>{['General','OBC','SC','ST','EWS','Minority'].map(x=><option key={x}>{x}</option>)}</select></label></div></div><div className="profile-section"><div className="section-head"><div><h3>Academic information</h3><p>Help us find opportunities that fit your journey.</p></div><GraduationCap size={19}/></div><div className="form-grid"><label>Education level<select value={draft.level} onChange={e=>change('level',e.target.value)}><option>School</option><option>Undergraduate</option><option>Postgraduate</option></select></label><label>Course or field<input value={draft.course} onChange={e=>change('course',e.target.value)}/></label><label>Institution<input value={draft.institution} onChange={e=>change('institution',e.target.value)}/></label><label>Previous marks (%)<input type="number" min="0" max="100" value={draft.marks} onChange={e=>change('marks',Number(e.target.value))}/></label><label>Annual family income<select value={draft.income<=250000?150000:draft.income<=500000?400000:draft.income<=1000000?800000:1500000} onChange={e=>change('income',Number(e.target.value))}><option value={150000}>Below ₹2.5 lakh</option><option value={400000}>₹2.5 – ₹5 lakh</option><option value={800000}>₹5 – ₹10 lakh</option><option value={1500000}>Above ₹10 lakh</option></select></label></div></div><div className="profile-save-row"><span><ShieldCheck size={15}/> Your profile is stored securely on this device.</span><button className="primary-btn" type="submit"><Check size={16}/> Save changes</button></div></div></div><aside className="profile-aside panel"><div className="aside-label"><Sparkles size={15}/> YOUR PROFILE</div><h3>A stronger profile, better matches.</h3><p>Keeping your academic and personal details up to date helps us find scholarships made for you.</p><div className="completion-bar"><span/></div><div className="completion-label"><span>Profile completeness</span><strong>85%</strong></div><div className="profile-tip"><div className="note-icon"><Award size={17}/></div><span><strong>Pro tip</strong> Add your latest marks and family income to unlock more accurate eligibility matches.</span></div></aside></form></>}
-function EmptyState({icon,title,text,action}:{icon:React.ReactNode;title:string;text:string;action?:React.ReactNode}){return <div className="empty-state"><div className="empty-icon">{icon}</div><h3>{title}</h3><p>{text}</p>{action}</div>}
+export default function App() {
+  const [page, setPage] = useState<Page>("Dashboard");
+  const [profile, setProfile] = usePersistentState(
+    STORAGE_KEYS.profile,
+    initialProfile,
+    isProfile,
+  );
+  const [saved, setSaved] = usePersistentState(
+    STORAGE_KEYS.saved,
+    initialSavedIds,
+    isSavedScholarshipList,
+  );
+  const [applications, setApplications] = usePersistentState(
+    STORAGE_KEYS.applications,
+    initialApplications,
+    isApplicationList,
+  );
+  const [selected, setSelected] = useState<Scholarship | null>(null);
+  const [toast, setToast] = useState("");
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("All");
+  const [level, setLevel] = useState("All");
+  const [sort, setSort] = useState<SortOrder>("deadline");
+  const [amountFilter, setAmountFilter] = useState<AmountFilter>("Any amount");
+  const [matchDone, setMatchDone] = useState(false);
+  const [applicationFilter, setApplicationFilter] = useState("All");
+  const toastTimer = useRef<number | undefined>(undefined);
 
-export default App;
+  const notify = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimer.current !== undefined)
+      window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(""), 2800);
+  }, []);
 
+  useEffect(
+    () => () => {
+      if (toastTimer.current !== undefined)
+        window.clearTimeout(toastTimer.current);
+    },
+    [],
+  );
 
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
+  const changePage = useCallback((nextPage: Page) => {
+    setPage(nextPage);
+    setSelected(null);
+    setMobileOpen(false);
+  }, []);
+
+  const openScholarship = useCallback((scholarship: Scholarship) => {
+    setSelected(scholarship);
+  }, []);
+
+  const updateProfile = useCallback(
+    (nextProfile: typeof profile) => {
+      setProfile(sanitizeProfile(nextProfile));
+    },
+    [setProfile],
+  );
+
+  const toggleSaved = useCallback(
+    (id: string) => {
+      const isSaved = saved.includes(id);
+      setSaved((current) =>
+        current.includes(id)
+          ? current.filter((savedId) => savedId !== id)
+          : [...current, id],
+      );
+      notify(isSaved ? "Removed from saved scholarships" : "Scholarship saved");
+    },
+    [notify, saved, setSaved],
+  );
+
+  const updateApplication = useCallback(
+    (id: string, status: Status) => {
+      if (!scholarships.some((scholarship) => scholarship.id === id)) {
+        notify("Scholarship could not be found");
+        return;
+      }
+      const updated = new Date().toISOString().slice(0, 10);
+      setApplications((current) => {
+        const existing = current.some((application) => application.id === id);
+        return existing
+          ? current.map((application) =>
+              application.id === id
+                ? { ...application, status, updated }
+                : application,
+            )
+          : [...current, { id, status, updated }];
+      });
+      notify("Application status updated");
+    },
+    [notify, setApplications],
+  );
+
+  const filteredScholarships = useMemo(
+    () =>
+      filterScholarships(scholarships, {
+        query,
+        category,
+        level,
+        amount: amountFilter,
+        sort,
+      }),
+    [amountFilter, category, level, query, sort],
+  );
+  const eligibilityMatches = useMemo(
+    () => matchScholarships(scholarships, profile),
+    [profile],
+  );
+  const applicationFor = (id: string) =>
+    applications.find((application) => application.id === id);
+
+  return (
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
+      {mobileOpen && (
+        <button
+          className="sidebar-backdrop"
+          aria-label="Close navigation menu"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+      <aside
+        className={`sidebar ${mobileOpen ? "open" : ""}`}
+        aria-label="GRANTLY workspace"
+      >
+        <div className="brand">
+          <div className="brand-mark" aria-hidden="true">
+            <GraduationCap size={21} />
+          </div>
+          <span>GRANTLY</span>
+          <button
+            className="icon-btn mobile-close"
+            aria-label="Close navigation menu"
+            onClick={() => setMobileOpen(false)}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="workspace-label">WORKSPACE</div>
+        <nav aria-label="Primary navigation">
+          {navigation.map(({ label, icon: Icon }) => (
+            <button
+              key={label}
+              className={`nav-item ${page === label ? "active" : ""}`}
+              aria-current={page === label ? "page" : undefined}
+              onClick={() => changePage(label)}
+            >
+              <Icon size={18} aria-hidden="true" />
+              <span>{label}</span>
+              {label === "Saved Scholarships" && saved.length > 0 && (
+                <span
+                  className="nav-count"
+                  aria-label={`${saved.length} saved scholarships`}
+                >
+                  {saved.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="help-card">
+            <div className="help-icon" aria-hidden="true">
+              <CircleHelp size={17} />
+            </div>
+            <strong>Need a hand?</strong>
+            <p>Check the scholarships that fit your profile.</p>
+            <button onClick={() => changePage("Eligibility Matching")}>
+              Check eligibility <ArrowRight size={13} aria-hidden="true" />
+            </button>
+          </div>
+          <button
+            className={`nav-item ${page === "My Profile" ? "active" : ""}`}
+            aria-current={page === "My Profile" ? "page" : undefined}
+            onClick={() => changePage("My Profile")}
+          >
+            <UserRound size={18} aria-hidden="true" />
+            <span>My Profile</span>
+          </button>
+          <div className="user-mini">
+            <div className="avatar" aria-hidden="true">
+              {initials(profile.name)}
+            </div>
+            <div className="user-info">
+              <strong>{profile.name}</strong>
+              <span>Student account</span>
+            </div>
+            <button
+              className="icon-btn"
+              aria-label="Edit account profile"
+              onClick={() => changePage("My Profile")}
+            >
+              <Settings size={17} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main className="main-area" id="main-content" tabIndex={-1}>
+        <header className="topbar">
+          <button
+            className="icon-btn menu-toggle"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open navigation menu"
+            aria-expanded={mobileOpen}
+            aria-controls="main-content"
+          >
+            <Menu size={20} aria-hidden="true" />
+          </button>
+          <div className="breadcrumb" aria-label="Current page">
+            <span>Workspace</span>
+            <ChevronRight size={14} aria-hidden="true" />
+            <span>{selected ? "Scholarship details" : page}</span>
+          </div>
+          <div className="top-actions">
+            <button
+              className="icon-btn notification"
+              aria-label="Show notifications"
+              onClick={() => notify("You’re all caught up")}
+            >
+              <Bell size={18} aria-hidden="true" />
+              <i aria-hidden="true" />
+            </button>
+            <div
+              className="top-avatar"
+              aria-label={`Signed in as ${profile.name}`}
+            >
+              {initials(profile.name)}
+            </div>
+          </div>
+        </header>
+
+        <div className="page-content">
+          {selected ? (
+            <Details
+              scholarship={selected}
+              saved={saved.includes(selected.id)}
+              onSave={() => toggleSaved(selected.id)}
+              onBack={() => setSelected(null)}
+              status={applicationFor(selected.id)?.status ?? "Not Started"}
+              onStatus={(status) => updateApplication(selected.id, status)}
+              onCheckEligibility={() => changePage("Eligibility Matching")}
+              onViewApplications={() => changePage("My Applications")}
+              notify={notify}
+            />
+          ) : page === "Dashboard" ? (
+            <Dashboard
+              profile={profile}
+              saved={saved}
+              apps={applications}
+              matches={eligibilityMatches}
+              open={openScholarship}
+              go={changePage}
+            />
+          ) : page === "Explore Scholarships" ? (
+            <Explore
+              query={query}
+              setQuery={setQuery}
+              category={category}
+              setCategory={setCategory}
+              level={level}
+              setLevel={setLevel}
+              sort={sort}
+              setSort={setSort}
+              amountFilter={amountFilter}
+              setAmountFilter={setAmountFilter}
+              scholarships={filteredScholarships}
+              saved={saved}
+              open={openScholarship}
+              toggleSave={toggleSaved}
+            />
+          ) : page === "Eligibility Matching" ? (
+            <Matching
+              profile={profile}
+              setProfile={updateProfile}
+              done={matchDone}
+              setDone={setMatchDone}
+              matched={eligibilityMatches}
+              open={openScholarship}
+            />
+          ) : page === "My Applications" ? (
+            <Applications
+              apps={applications}
+              filter={applicationFilter}
+              setFilter={setApplicationFilter}
+              open={openScholarship}
+              update={updateApplication}
+            />
+          ) : page === "Saved Scholarships" ? (
+            <Saved
+              saved={saved}
+              open={openScholarship}
+              toggle={toggleSaved}
+              go={changePage}
+            />
+          ) : (
+            <ProfilePage
+              profile={profile}
+              setProfile={updateProfile}
+              notify={notify}
+            />
+          )}
+        </div>
+      </main>
+      <div className="toast-region" aria-live="polite" aria-atomic="true">
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="toast"
+          >
+            <span className="toast-check" aria-hidden="true">
+              ✓
+            </span>
+            {toast}
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+}
