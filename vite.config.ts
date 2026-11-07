@@ -1,0 +1,1 @@
+import { defineConfig } from 'vite'; import react from '@vitejs/plugin-react'; export default defineConfig({ base: '/GRANTLY-Unified_Scholarship_Discovery_and_Management_Platform/', plugins: [react()] });
