@@ -29,7 +29,11 @@ The sample scholarship data is included in the frontend. No backend is required 
 
 ## Deployment
 
-The project is configured for Vercel in `vercel.json` with `npm ci`, `npm run build`, and `dist` as the output directory. Import this public repository in Vercel and connect the `main` branch to enable automatic production deployments. Vite uses the root asset path required by Vercel.
+**Live application:** [https://grantly-scholarship-platform.vercel.app/](https://grantly-scholarship-platform.vercel.app/)
+
+**GitHub repository:** [https://github.com/gireeshpatgar17/GRANTLY-Unified_Scholarship_Discovery_and_Management_Platform](https://github.com/gireeshpatgar17/GRANTLY-Unified_Scholarship_Discovery_and_Management_Platform)
+
+The project is configured for Vercel in `vercel.json` with `npm ci`, `npm run build`, and `dist` as the output directory. Connect the `main` branch for automatic production deployments. Vite uses the root asset path required by Vercel.
 
 ## Quality checks
 
